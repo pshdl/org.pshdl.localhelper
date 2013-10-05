@@ -51,7 +51,7 @@ public class GuiClient implements IWorkspaceListener {
 		shell = new Shell(display);
 		shell.setSize(500, 400);
 		shell.setLayout(new GridLayout(3, false));
-
+		loadImages();
 		final Label lblWorkspaceDirectory = new Label(shell, SWT.NONE);
 		lblWorkspaceDirectory.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
 		lblWorkspaceDirectory.setText("Workspace directory");
@@ -152,6 +152,7 @@ public class GuiClient implements IWorkspaceListener {
 		});
 
 		final Tray tray = display.getSystemTray();
+		shell.pack();
 		shell.open();
 
 		if (tray == null) {
@@ -160,6 +161,27 @@ public class GuiClient implements IWorkspaceListener {
 			createTrayItem(shell, tray);
 		}
 		return shell;
+	}
+
+	private void loadImages() {
+		try {
+			final ClassLoader loader = GuiClient.class.getClassLoader();
+			final InputStream is16 = loader.getResourceAsStream("PSHDLIcon16.png");
+			final Image icon16 = new Image(display, is16);
+			is16.close();
+			final InputStream is32 = loader.getResourceAsStream("PSHDLIcon32.png");
+			final Image icon32 = new Image(display, is32);
+			is32.close();
+			final InputStream is64 = loader.getResourceAsStream("PSHDLIcon64.png");
+			final Image icon64 = new Image(display, is64);
+			is64.close();
+			final InputStream is128 = loader.getResourceAsStream("PSHDLIcon128.png");
+			final Image icon128 = new Image(display, is128);
+			is128.close();
+			shell.setImages(new Image[] { icon16, icon32, icon64, icon128 });
+		} catch (final IOException e) {
+			e.printStackTrace();
+		}
 	}
 
 	private static void createTrayItem(final Shell shell, final Tray tray) {
@@ -218,13 +240,34 @@ public class GuiClient implements IWorkspaceListener {
 
 	@Override
 	public void connectionStatus(final Status status) {
-		display.asyncExec(new Runnable() {
+		if ((display != null) && !display.isDisposed()) {
+			display.asyncExec(new Runnable() {
 
-			@Override
-			public void run() {
-				System.out.println("GuiClient.connectionStatus(...).new Runnable() {...}.run()" + status);
-			}
-		});
+				@Override
+				public void run() {
+					switch (status) {
+					case CLOSED:
+					case ERROR:
+						btnConnect.setEnabled(true);
+						widText.setEnabled(true);
+						btnConnect.setText("connect");
+						break;
+					case CONNECTING:
+						btnConnect.setEnabled(false);
+						widText.setEnabled(false);
+						btnConnect.setText("connecting");
+						break;
+					case CONNECTED:
+						btnConnect.setEnabled(true);
+						widText.setEnabled(false);
+						btnConnect.setText("disconnect");
+						break;
+					case RECONNECT:
+						break;
+					}
+				}
+			});
+		}
 	}
 
 	@Override

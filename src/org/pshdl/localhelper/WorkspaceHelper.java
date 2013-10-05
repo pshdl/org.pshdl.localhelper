@@ -109,48 +109,67 @@ public class WorkspaceHelper {
 	}
 
 	public void connectTo(final String wid) throws IOException {
-		try {
-			listener.connectionStatus(Status.CONNECTING);
-			final ClientConfig clientConfig = new ClientConfig();
-			final Client client = ClientBuilder.newClient(clientConfig);
-			final WebTarget resource = client.target(getURL(wid, true));
-			final String clientID = resource.path("clientID").request().get(String.class);
-			connectToStream(wid, resource, clientID);
-			final String repoInfo = client.target(getURL(wid, false)).request().accept(MediaType.APPLICATION_JSON).get(String.class);
-			final RepoInfo repo = repoReader.readValue(repoInfo);
-			for (final FileInfo fi : repo.getFiles()) {
-				handleFileInfo(fi);
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					listener.connectionStatus(Status.CONNECTING);
+					final ClientConfig clientConfig = new ClientConfig();
+					final Client client = ClientBuilder.newClient(clientConfig);
+					final WebTarget resource = client.target(getURL(wid, true));
+					final String clientID = resource.path("clientID").request().get(String.class);
+					connectToStream(wid, resource, clientID);
+					final String repoInfo = client.target(getURL(wid, false)).request().accept(MediaType.APPLICATION_JSON).get(String.class);
+					final RepoInfo repo = repoReader.readValue(repoInfo);
+					for (final FileInfo fi : repo.getFiles()) {
+						handleFileInfo(fi);
+					}
+					listener.connectionStatus(Status.CONNECTED);
+				} catch (final Exception e) {
+					listener.doLog(Severity.ERROR, e.getMessage());
+					listener.connectionStatus(Status.ERROR);
+				}
 			}
-			listener.connectionStatus(Status.CONNECTED);
-		} catch (final Exception e) {
-			listener.doLog(Severity.ERROR, e.getMessage());
-			listener.connectionStatus(Status.ERROR);
-		}
+		}, "connect").start();
 	}
 
+	private long lastConnect;
+	private Thread chunky;
+
 	public void connectToStream(final String wid, final WebTarget resource, final String clientID) {
+		lastConnect = System.currentTimeMillis();
 		final WebTarget path = resource.path(clientID).path("streaming");
 		System.out.println("WorkspaceHelper.connectToStream()" + path.getUri());
 		final Response response = path.request().get();
 		chunkedInput = response.readEntity(new GenericType<ChunkedInput<String>>() {
 		});
-		new Thread(new Runnable() {
+		chunky = new Thread(new Runnable() {
 			@Override
 			public void run() {
 				try {
 					String chunk;
-					while ((chunk = chunkedInput.read()) != null) {
+					final ChunkedInput<String> ci = chunkedInput;
+					while ((chunk = ci.read()) != null) {
 						final Message<?> message = messageReader.readValue(chunk);
 						listener.incomingMessage(message);
 						handleMessage(message);
 					}
-					listener.doLog(Severity.WARNING, "Connection closed, re-connecting");
-					connectToStream(wid, resource, clientID);
+					if (ci != chunkedInput)
+						return;
+					if ((System.currentTimeMillis() - lastConnect) > 1000) {
+						listener.doLog(Severity.WARNING, "Connection closed, re-connecting");
+						listener.connectionStatus(Status.RECONNECT);
+						connectToStream(wid, resource, clientID);
+					} else {
+						listener.doLog(Severity.ERROR, "Connection closed, re-connecting too fast");
+						listener.connectionStatus(Status.ERROR);
+					}
 				} catch (final Throwable e) {
 					e.printStackTrace();
 				}
 			}
-		}, "chunky").start();
+		}, "chunky");
+		chunky.start();
 	}
 
 	protected void handleMessage(Message<?> message) {
@@ -188,6 +207,10 @@ public class WorkspaceHelper {
 						localFile.delete();
 						listener.fileOperation(FileOp.REMOVED, localFile);
 					}
+					final CompileInfo info = fi.getInfo();
+					if (info != null) {
+						deleteCompileInfoFiles(info);
+					}
 				} else {
 					listener.doLog(Severity.WARNING, "A file that existed remotely but not locally has been deleted:" + fi.getName());
 				}
@@ -195,6 +218,39 @@ public class WorkspaceHelper {
 				listener.doLog(Severity.ERROR, e.getMessage());
 				e.printStackTrace();
 			}
+		}
+		if (Message.VHDL.equals(subject)) {
+			System.out.println("WorkspaceHelper.handleMessage()" + message);
+			try {
+				final CompileContainer cc = getContent(message, CompileContainer.class);
+				final Set<CompileInfo> results = cc.getCompileResults();
+				for (final CompileInfo ci : results) {
+					handleCompileInfo(ci);
+				}
+			} catch (final Exception e) {
+				listener.doLog(Severity.ERROR, e.getMessage());
+				e.printStackTrace();
+			}
+		}
+	}
+
+	private void deleteCompileInfoFiles(final CompileInfo info) {
+		final File srcGenDir = new File(root, "src-gen/");
+		final File file = new File(srcGenDir, info.getFile());
+		file.delete();
+		final List<OutputInfo> outputs = info.getAddOutputs();
+		for (final OutputInfo oi : outputs) {
+			final File oF = new File(srcGenDir, oi.getRelPath());
+			deleteFileAndDir(srcGenDir, oF);
+		}
+	}
+
+	private void deleteFileAndDir(File srcGenDir, File oF) {
+		if (srcGenDir.getAbsolutePath().equals(oF.getAbsolutePath()))
+			return;
+		oF.delete();
+		if (oF.getParentFile().list().length == 0) {
+			deleteFileAndDir(srcGenDir, oF.getParentFile());
 		}
 	}
 
@@ -204,18 +260,22 @@ public class WorkspaceHelper {
 		handleFile(name, name, lastModified);
 		final CompileInfo compileInfo = fi.getInfo();
 		if (compileInfo != null) {
-			final List<OutputInfo> addOutputs = compileInfo.getAddOutputs();
-			for (final OutputInfo outputInfo : addOutputs) {
-				handleFile(outputInfo.getRelPath(), outputInfo.getFileURI(), outputInfo.getLastModified());
-			}
-			handleFile(compileInfo.getFile(), compileInfo.getFileURI(), compileInfo.getCreated());
+			handleCompileInfo(compileInfo);
 		}
+	}
+
+	public void handleCompileInfo(final CompileInfo compileInfo) {
+		final List<OutputInfo> addOutputs = compileInfo.getAddOutputs();
+		for (final OutputInfo outputInfo : addOutputs) {
+			handleFile("src-gen/" + outputInfo.getRelPath(), outputInfo.getFileURI(), outputInfo.getLastModified());
+		}
+		handleFile("src-gen/" + compileInfo.getFile(), compileInfo.getFileURI(), compileInfo.getCreated());
 	}
 
 	public void handleFile(final String name, String uri, final long lastModified) {
 		final File localFile = new File(root, name);
 		if (localFile.exists()) {
-			if (localFile.lastModified() < lastModified) {
+			if ((localFile.lastModified() < lastModified) || (lastModified == 0)) {
 				downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
 			} else {
 				if (localFile.lastModified() != lastModified) {
@@ -242,10 +302,10 @@ public class WorkspaceHelper {
 	private void downloadFile(File localFile, FileOp op, long lastModified, String name) {
 		try {
 			URL url;
-			if (name.charAt(0) == '/') {
+			if (name.charAt(0) != '/') {
 				url = new URL(getURL(workspaceID, false) + "/" + name + "?plain=true");
 			} else {
-				url = new URL(getServer() + "/" + name + "?plain=true");
+				url = new URL("http://" + getServer() + name + "?plain=true");
 			}
 			System.out.println("WorkspaceHelper.downloadFile()" + url);
 			final InputStream os = url.openStream();
@@ -260,8 +320,22 @@ public class WorkspaceHelper {
 
 	public void closeConnection() {
 		if (chunkedInput != null) {
-			chunkedInput.close();
+			final ChunkedInput<?> ci = chunkedInput;
+			final Thread t = chunky;
+			chunky = null;
 			chunkedInput = null;
+			new Thread(new Runnable() {
+				@Override
+				public void run() {
+					try {
+						t.interrupt();
+						ci.close();
+					} catch (final Exception e) {
+						e.printStackTrace();
+					}
+				}
+			}).start();
+			listener.connectionStatus(Status.CLOSED);
 		}
 	}
 
