@@ -15,6 +15,9 @@ import org.pshdl.localhelper.WorkspaceHelper.Status;
 import org.pshdl.rest.models.*;
 
 public class GuiClient implements IWorkspaceListener {
+	private static final String CONNECTING_STR = "Connecting";
+	private static final String CONNECT_STR = "Connect";
+	private static final String DISCONNECT_STR = "Disconnect";
 	private final WorkspaceHelper helper;
 	private Text widText;
 	private Button btnConnect;
@@ -80,7 +83,9 @@ public class GuiClient implements IWorkspaceListener {
 
 			}
 		});
-		btnChoose.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
+		final GridData layoutData = new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1);
+		layoutData.widthHint = 150;
+		btnChoose.setLayoutData(layoutData);
 		btnChoose.setText("Choose");
 
 		final Label lblWorkspace = new Label(shell, SWT.NONE);
@@ -103,7 +108,7 @@ public class GuiClient implements IWorkspaceListener {
 				if (validate != null) {
 					showAlert(shell, validate);
 				} else {
-					if ("disconnect".equals(btnConnect.getText())) {
+					if (DISCONNECT_STR.equals(btnConnect.getText())) {
 						helper.closeConnection();
 					} else {
 						try {
@@ -124,11 +129,10 @@ public class GuiClient implements IWorkspaceListener {
 		});
 		btnConnect.setEnabled(workspaceFolder != null);
 		btnConnect.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
-		btnConnect.setText("Connect");
+		btnConnect.setText(CONNECT_STR);
 
 		final Label lblProgress = new Label(shell, SWT.NONE);
 		lblProgress.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
-		lblProgress.setText("Progress");
 
 		final ProgressBar progressBar = new ProgressBar(shell, SWT.NONE);
 		progressBar.setLayoutData(new GridData(SWT.FILL, SWT.FILL, false, false, 1, 1));
@@ -151,15 +155,15 @@ public class GuiClient implements IWorkspaceListener {
 			}
 		});
 
-		final Tray tray = display.getSystemTray();
+		// final Tray tray = display.getSystemTray();
 		shell.pack();
 		shell.open();
 
-		if (tray == null) {
-			System.out.println("The system tray is not available");
-		} else {
-			createTrayItem(shell, tray);
-		}
+		// if (tray == null) {
+		// System.out.println("The system tray is not available");
+		// } else {
+		// createTrayItem(shell, tray);
+		// }
 		return shell;
 	}
 
@@ -250,17 +254,17 @@ public class GuiClient implements IWorkspaceListener {
 					case ERROR:
 						btnConnect.setEnabled(true);
 						widText.setEnabled(true);
-						btnConnect.setText("connect");
+						btnConnect.setText(CONNECT_STR);
 						break;
 					case CONNECTING:
 						btnConnect.setEnabled(false);
 						widText.setEnabled(false);
-						btnConnect.setText("connecting");
+						btnConnect.setText(CONNECTING_STR);
 						break;
 					case CONNECTED:
 						btnConnect.setEnabled(true);
 						widText.setEnabled(false);
-						btnConnect.setText("disconnect");
+						btnConnect.setText(DISCONNECT_STR);
 						break;
 					case RECONNECT:
 						break;
@@ -289,5 +293,11 @@ public class GuiClient implements IWorkspaceListener {
 	@Override
 	public void fileOperation(FileOp op, File localFile) {
 		doLog(Severity.INFO, "Performed the file operation:" + op + " on file:" + localFile);
+	}
+
+	@Override
+	public void doLog(Exception e) {
+		doLog(Severity.ERROR, e.getMessage());
+		e.printStackTrace();
 	}
 }

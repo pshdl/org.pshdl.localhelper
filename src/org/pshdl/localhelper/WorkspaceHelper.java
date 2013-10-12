@@ -1,22 +1,19 @@
 package org.pshdl.localhelper;
 
 import java.io.*;
-import java.net.*;
 import java.util.*;
 import java.util.prefs.*;
 
-import javax.ws.rs.client.*;
-import javax.ws.rs.core.*;
-
-import org.glassfish.jersey.client.*;
 import org.pshdl.rest.models.*;
 
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
 import com.google.common.base.*;
+import com.google.common.collect.*;
 import com.google.common.io.*;
 
 public class WorkspaceHelper {
+
 	public static enum Status {
 		CONNECTING, CONNECTED, CLOSED, RECONNECT, ERROR
 	}
@@ -37,6 +34,61 @@ public class WorkspaceHelper {
 		public void incomingMessage(Message<?> message);
 
 		public void fileOperation(FileOp op, File localFile);
+
+		public void doLog(Exception e);
+	}
+
+	public static interface MessageHandler<T> {
+		public void handle(Message<T> msg, IWorkspaceListener listener) throws Exception;
+	}
+
+	public class FileInfoArrayHandler implements MessageHandler<FileInfo[]> {
+
+		@Override
+		public void handle(Message<FileInfo[]> msg, IWorkspaceListener listener) throws Exception {
+			final FileInfo[] readValues = getContent(msg, FileInfo[].class);
+			for (final FileInfo fi : readValues) {
+				handleFileInfo(fi);
+			}
+		}
+
+	}
+
+	public class FileInfoDeleteHandler implements MessageHandler<FileInfo> {
+
+		@Override
+		public void handle(Message<FileInfo> msg, IWorkspaceListener listener) throws Exception {
+			final FileInfo fi = getContent(msg, FileInfo.class);
+			final File localFile = new File(root, fi.getRecord().getRelPath());
+			if (localFile.exists()) {
+				if (localFile.lastModified() > fi.getRecord().getLastModified()) {
+					listener.doLog(Severity.WARNING, "A file that existed locally is newer than a remotely deleted file:" + fi.getRecord().getRelPath());
+				} else {
+					localFile.delete();
+					listener.fileOperation(FileOp.REMOVED, localFile);
+				}
+				final CompileInfo info = fi.getInfo();
+				if (info != null) {
+					deleteCompileInfoFiles(info);
+				}
+			} else {
+				listener.doLog(Severity.WARNING, "A file that existed remotely but not locally has been deleted:" + fi.getRecord().getRelPath());
+			}
+
+		}
+
+	}
+
+	public class CompileContainerHandler implements MessageHandler<CompileInfo[]> {
+
+		@Override
+		public void handle(Message<CompileInfo[]> msg, IWorkspaceListener listener) throws Exception {
+			final CompileInfo[] cc = getContent(msg, CompileInfo[].class);
+			for (final CompileInfo ci : cc) {
+				handleCompileInfo(ci);
+			}
+		}
+
 	}
 
 	private static final String PREF_LAST_WD = "WORKSPACE_DIR";
@@ -44,22 +96,30 @@ public class WorkspaceHelper {
 	private File root;
 	private String workspaceID;
 	private final Preferences prefs;
-	private static final String SERVER = getServer();
 	private static final ObjectWriter writer = JSONHelper.getWriter();
-	private static final ObjectReader messageReader = JSONHelper.getReader(Message.class);
-	private static final ObjectReader repoReader = JSONHelper.getReader(RepoInfo.class);
-	private static final ObjectMapper mapper = JSONHelper.getMapper();
 	private final IWorkspaceListener listener;
-	private ChunkedInput<String> chunkedInput;
+	private final ConnectionHelper ch;
+	private final Multimap<String, MessageHandler<?>> handlerMap = LinkedListMultimap.create();
+
+	private static final ObjectMapper mapper = JSONHelper.getMapper();
 
 	public WorkspaceHelper(IWorkspaceListener listener) {
 		this.prefs = Preferences.userNodeForPackage(this.getClass());
 		final String string = prefs.get(PREF_LAST_WD, null);
 		if (string != null) {
-			root = new File(string);
-			readWorkspaceID();
+			setWorkspace(string);
 		}
 		this.listener = listener;
+		this.ch = new ConnectionHelper(listener, this);
+		registerFileSyncHandlers();
+	}
+
+	public void registerFileSyncHandlers() {
+		handlerMap.put(Message.ADDED, new FileInfoArrayHandler());
+		handlerMap.put(Message.UPDATED, new FileInfoArrayHandler());
+		handlerMap.put(Message.DELETED, new FileInfoDeleteHandler());
+		handlerMap.put(Message.VHDL, new CompileContainerHandler());
+		handlerMap.put(Message.PSEX, new CompileContainerHandler());
 	}
 
 	public void readWorkspaceID() {
@@ -77,15 +137,9 @@ public class WorkspaceHelper {
 		this.root = new File(folder);
 		prefs.put(PREF_LAST_WD, folder);
 		readWorkspaceID();
-	}
+		if (root.exists()) {
 
-	private static String getServer() {
-		final String property = System.getProperty("PSHDL_SERVER");
-		if (property != null) {
-			System.out.println("WorkspaceHelper.getServer()" + property);
-			return property;
 		}
-		return "api.pshdl.org";
 	}
 
 	public String validateWorkspaceID(String wid) {
@@ -104,144 +158,36 @@ public class WorkspaceHelper {
 		try {
 			Files.write(wid, new File(root, WID_FILE), Charsets.UTF_8);
 		} catch (final IOException e) {
-			e.printStackTrace();
+			listener.doLog(e);
 		}
 	}
 
-	public void connectTo(final String wid) throws IOException {
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					listener.connectionStatus(Status.CONNECTING);
-					final ClientConfig clientConfig = new ClientConfig();
-					final Client client = ClientBuilder.newClient(clientConfig);
-					final WebTarget resource = client.target(getURL(wid, true));
-					final String clientID = resource.path("clientID").request().get(String.class);
-					connectToStream(wid, resource, clientID);
-					final String repoInfo = client.target(getURL(wid, false)).request().accept(MediaType.APPLICATION_JSON).get(String.class);
-					final RepoInfo repo = repoReader.readValue(repoInfo);
-					for (final FileInfo fi : repo.getFiles()) {
-						handleFileInfo(fi);
-					}
-					listener.connectionStatus(Status.CONNECTED);
-				} catch (final Exception e) {
-					listener.doLog(Severity.ERROR, e.getMessage());
-					listener.connectionStatus(Status.ERROR);
-				}
-			}
-		}, "connect").start();
-	}
-
-	private long lastConnect;
-	private Thread chunky;
-
-	public void connectToStream(final String wid, final WebTarget resource, final String clientID) {
-		lastConnect = System.currentTimeMillis();
-		final WebTarget path = resource.path(clientID).path("streaming");
-		System.out.println("WorkspaceHelper.connectToStream()" + path.getUri());
-		final Response response = path.request().get();
-		chunkedInput = response.readEntity(new GenericType<ChunkedInput<String>>() {
-		});
-		chunky = new Thread(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					String chunk;
-					final ChunkedInput<String> ci = chunkedInput;
-					while ((chunk = ci.read()) != null) {
-						final Message<?> message = messageReader.readValue(chunk);
-						listener.incomingMessage(message);
-						handleMessage(message);
-					}
-					if (ci != chunkedInput)
-						return;
-					if ((System.currentTimeMillis() - lastConnect) > 1000) {
-						listener.doLog(Severity.WARNING, "Connection closed, re-connecting");
-						listener.connectionStatus(Status.RECONNECT);
-						connectToStream(wid, resource, clientID);
-					} else {
-						listener.doLog(Severity.ERROR, "Connection closed, re-connecting too fast");
-						listener.connectionStatus(Status.ERROR);
-					}
-				} catch (final Throwable e) {
-					e.printStackTrace();
-				}
-			}
-		}, "chunky");
-		chunky.start();
-	}
-
-	protected void handleMessage(Message<?> message) {
+	protected <T> void handleMessage(Message<T> message) {
 		final String subject = message.getSubject();
-		if (Message.ADDED.equals(subject)) {
-			try {
-				final FileInfo[] readValues = getContent(message, FileInfo[].class);
-				for (final FileInfo fi : readValues) {
-					handleFileInfo(fi);
+		final Iterable<String> split = Splitter.on(':').split(subject);
+		final StringBuilder sb = new StringBuilder();
+		for (final String string : split) {
+			sb.append(string);
+			final String newSubject = sb.toString();
+			final Collection<MessageHandler<?>> handlers = handlerMap.get(newSubject);
+			for (final MessageHandler<?> messageHandler : handlers) {
+				@SuppressWarnings("unchecked")
+				final MessageHandler<T> handler = (MessageHandler<T>) messageHandler;
+				try {
+					handler.handle(message, listener);
+				} catch (final Exception e) {
+					listener.doLog(e);
 				}
-			} catch (final Exception e) {
-				listener.doLog(Severity.ERROR, e.getMessage());
-				e.printStackTrace();
 			}
-		}
-		if (Message.UPDATED.equals(subject)) {
-			try {
-				final FileInfo[] readValues = getContent(message, FileInfo[].class);
-				for (final FileInfo fi : readValues) {
-					handleFileInfo(fi);
-				}
-			} catch (final Exception e) {
-				listener.doLog(Severity.ERROR, e.getMessage());
-				e.printStackTrace();
-			}
-		}
-		if (Message.DELETED.equals(subject)) {
-			try {
-				final FileInfo fi = getContent(message, FileInfo.class);
-				final File localFile = new File(root, fi.getName());
-				if (localFile.exists()) {
-					if (localFile.lastModified() > fi.getLastModified()) {
-						listener.doLog(Severity.WARNING, "A file that existed locally is newer than a remotely deleted file:" + fi.getName());
-					} else {
-						localFile.delete();
-						listener.fileOperation(FileOp.REMOVED, localFile);
-					}
-					final CompileInfo info = fi.getInfo();
-					if (info != null) {
-						deleteCompileInfoFiles(info);
-					}
-				} else {
-					listener.doLog(Severity.WARNING, "A file that existed remotely but not locally has been deleted:" + fi.getName());
-				}
-			} catch (final Exception e) {
-				listener.doLog(Severity.ERROR, e.getMessage());
-				e.printStackTrace();
-			}
-		}
-		if (Message.VHDL.equals(subject)) {
-			System.out.println("WorkspaceHelper.handleMessage()" + message);
-			try {
-				final CompileContainer cc = getContent(message, CompileContainer.class);
-				final Set<CompileInfo> results = cc.getCompileResults();
-				for (final CompileInfo ci : results) {
-					handleCompileInfo(ci);
-				}
-			} catch (final Exception e) {
-				listener.doLog(Severity.ERROR, e.getMessage());
-				e.printStackTrace();
-			}
+			sb.append(':');
 		}
 	}
 
 	private void deleteCompileInfoFiles(final CompileInfo info) {
-		final File srcGenDir = new File(root, "src-gen/");
-		final File file = new File(srcGenDir, info.getFile());
-		file.delete();
-		final List<OutputInfo> outputs = info.getAddOutputs();
-		for (final OutputInfo oi : outputs) {
-			final File oF = new File(srcGenDir, oi.getRelPath());
-			deleteFileAndDir(srcGenDir, oF);
+		final List<FileRecord> outputs = info.getFiles();
+		for (final FileRecord oi : outputs) {
+			final File oF = new File(root, oi.getRelPath());
+			deleteFileAndDir(root, oF);
 		}
 	}
 
@@ -255,9 +201,7 @@ public class WorkspaceHelper {
 	}
 
 	public void handleFileInfo(final FileInfo fi) {
-		final String name = fi.getName();
-		final long lastModified = fi.getLastModified();
-		handleFile(name, name, lastModified);
+		handleFileUpdate(fi.getRecord());
 		final CompileInfo compileInfo = fi.getInfo();
 		if (compileInfo != null) {
 			handleCompileInfo(compileInfo);
@@ -265,23 +209,25 @@ public class WorkspaceHelper {
 	}
 
 	public void handleCompileInfo(final CompileInfo compileInfo) {
-		final List<OutputInfo> addOutputs = compileInfo.getAddOutputs();
-		for (final OutputInfo outputInfo : addOutputs) {
-			handleFile("src-gen/" + outputInfo.getRelPath(), outputInfo.getFileURI(), outputInfo.getLastModified());
+		final List<FileRecord> addOutputs = compileInfo.getFiles();
+		for (final FileRecord outputInfo : addOutputs) {
+			handleFileUpdate(outputInfo);
 		}
-		handleFile("src-gen/" + compileInfo.getFile(), compileInfo.getFileURI(), compileInfo.getCreated());
 	}
 
-	public void handleFile(final String name, String uri, final long lastModified) {
-		final File localFile = new File(root, name);
+	public void handleFileUpdate(FileRecord fr) {
+		final File localFile = new File(root, fr.getRelPath());
+		final long lastModified = fr.getLastModified() + ch.serverDiff;
+		final String uri = fr.getFileURI();
 		if (localFile.exists()) {
-			if ((localFile.lastModified() < lastModified) || (lastModified == 0)) {
-				downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
+			long localLastModified = localFile.lastModified();
+			if ((localLastModified < lastModified) || (lastModified == 0)) {
+				ch.downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
 			} else {
-				if (localFile.lastModified() != lastModified) {
-					localFile.renameTo(new File(localFile.getParent(), localFile.getName() + "_conflict" + localFile.lastModified()));
+				if (localLastModified != lastModified) {
+					localFile.renameTo(new File(localFile.getParent(), localFile.getName() + "_conflict" + localLastModified));
 					listener.doLog(Severity.WARNING, "The remote file was older than the local file. Created a backup of local file and used remote file");
-					downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
+					ch.downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
 				}
 			}
 		} else {
@@ -289,67 +235,14 @@ public class WorkspaceHelper {
 			if (!parentFile.exists()) {
 				parentFile.mkdirs();
 			}
-			downloadFile(localFile, FileOp.ADDED, lastModified, uri);
+			ch.downloadFile(localFile, FileOp.ADDED, lastModified, uri);
 		}
 	}
 
-	public <T> T getContent(Message<?> message, Class<T> clazz) throws JsonProcessingException, IOException, JsonParseException, JsonMappingException {
+	public static <T> T getContent(Message<?> message, Class<T> clazz) throws JsonProcessingException, IOException, JsonParseException, JsonMappingException {
 		final Object json = message.getContents();
 		final String jsonString = writer.writeValueAsString(json);
 		return mapper.readValue(jsonString, clazz);
-	}
-
-	private void downloadFile(File localFile, FileOp op, long lastModified, String name) {
-		try {
-			URL url;
-			if (name.charAt(0) != '/') {
-				url = new URL(getURL(workspaceID, false) + "/" + name + "?plain=true");
-			} else {
-				url = new URL("http://" + getServer() + name + "?plain=true");
-			}
-			System.out.println("WorkspaceHelper.downloadFile()" + url);
-			final InputStream os = url.openStream();
-			ByteStreams.copy(os, Files.newOutputStreamSupplier(localFile));
-			os.close();
-			localFile.setLastModified(lastModified);
-			listener.fileOperation(op, localFile);
-		} catch (final Exception e) {
-			e.printStackTrace();
-		}
-	}
-
-	public void closeConnection() {
-		if (chunkedInput != null) {
-			final ChunkedInput<?> ci = chunkedInput;
-			final Thread t = chunky;
-			chunky = null;
-			chunkedInput = null;
-			new Thread(new Runnable() {
-				@Override
-				public void run() {
-					try {
-						t.interrupt();
-						ci.close();
-					} catch (final Exception e) {
-						e.printStackTrace();
-					}
-				}
-			}).start();
-			listener.connectionStatus(Status.CLOSED);
-		}
-	}
-
-	public boolean isConnected() {
-		if (chunkedInput == null)
-			return false;
-		return !chunkedInput.isClosed();
-	}
-
-	public String getURL(String workspaceID, boolean streaming) {
-		if (streaming)
-			return "http://" + SERVER + "/api/v0.1/streaming/workspace/" + workspaceID.toUpperCase();
-		return "http://" + SERVER + "/api/v0.1/workspace/" + workspaceID.toUpperCase();
-
 	}
 
 	public File getWorkspaceFolder() {
@@ -358,6 +251,14 @@ public class WorkspaceHelper {
 
 	public String getWorkspaceID() {
 		return workspaceID;
+	}
+
+	public void closeConnection() {
+		ch.closeConnection();
+	}
+
+	public void connectTo(String wid) throws IOException {
+		ch.connectTo(wid);
 	}
 
 }
