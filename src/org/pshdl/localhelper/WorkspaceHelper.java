@@ -220,7 +220,7 @@ public class WorkspaceHelper {
 		final long lastModified = fr.getLastModified() + ch.serverDiff;
 		final String uri = fr.getFileURI();
 		if (localFile.exists()) {
-			long localLastModified = localFile.lastModified();
+			final long localLastModified = localFile.lastModified();
 			if ((localLastModified < lastModified) || (lastModified == 0)) {
 				ch.downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
 			} else {
