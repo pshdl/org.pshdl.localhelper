@@ -1,9 +1,11 @@
 package org.pshdl.localhelper;
 
 import java.io.*;
+import java.net.*;
 import java.util.*;
 import java.util.prefs.*;
 
+import org.pshdl.localhelper.ConnectionHelper.Status;
 import org.pshdl.rest.models.*;
 
 import com.fasterxml.jackson.core.*;
@@ -14,12 +16,89 @@ import com.google.common.io.*;
 
 public class WorkspaceHelper {
 
-	public static enum Status {
-		CONNECTING, CONNECTED, CLOSED, RECONNECT, ERROR
+	private final class FileMonitor implements Runnable {
+		public boolean stop = false;
+		public File rootFolder;
+		public URI rootURI;
+		public Set<File> monitoredFiles = Sets.newHashSet();
+		private final Set<String> extensions = Sets.newHashSet("pshdl", "vhd", "vhdl");
+
+		public FileMonitor(File rootFolder) {
+			super();
+			this.rootFolder = rootFolder;
+			this.rootURI = rootFolder.toURI();
+		}
+
+		@Override
+		public void run() {
+			try {
+				System.out.println("WorkspaceHelper.FileMonitor.run() Monitoring on folder:" + rootFolder);
+				while (!stop) {
+					findMonitorFiles(rootFolder);
+					for (int i = 0; i < 10; i++) {
+						Thread.sleep(1000);
+						if (stop)
+							return;
+						for (final File f : monitoredFiles) {
+							handleLocalFile(f);
+						}
+					}
+				}
+			} catch (final InterruptedException e) {
+			}
+		}
+
+		private void findMonitorFiles(File file) {
+			// System.out.println("WorkspaceHelper.FileMonitor.findMonitorFiles()"
+			// + file);
+			final String extension = Files.getFileExtension(file.getName());
+			if (file.isDirectory()) {
+				if ("src-gen".equals(file.getName()))
+					return;
+				final File[] listFiles = file.listFiles();
+				for (final File subFile : listFiles) {
+					findMonitorFiles(subFile);
+				}
+			} else if (extensions.contains(extension.toLowerCase())) {
+				if (monitoredFiles.add(file)) {
+					handleLocalFile(file);
+				}
+			}
+		}
+
+		private void handleLocalFile(File file) {
+			final String relPath = rootURI.relativize(file.toURI()).toString();
+			if (!file.exists()) {
+				ch.deleteFile(workspaceID, relPath);
+				monitoredFiles.remove(file);
+			} else {
+				final FileInfo info = knownFiles.get(relPath);
+				if (info != null) {
+					final FileRecord record = info.getRecord();
+					if (getModification(record) < file.lastModified()) {
+						System.out.println("WorkspaceHelper.FileMonitor.findMonitorFiles() Uploading outdated file");
+						try {
+							ch.uploadFile(file, workspaceID, record.getRelPath());
+							listener.fileOperation(FileOp.UPLOADED, file);
+						} catch (final IOException e) {
+							listener.doLog(e);
+						}
+					}
+				} else {
+					System.out.println("WorkspaceHelper.FileMonitor.findMonitorFiles() Uploading unknown file");
+					try {
+						ch.uploadFile(file, workspaceID, relPath);
+						listener.fileOperation(FileOp.UPLOADED, file);
+					} catch (final IOException e) {
+						listener.doLog(e);
+					}
+				}
+			}
+		}
 	}
 
 	public static enum FileOp {
-		ADDED, UPDATED, REMOVED;
+		ADDED, UPDATED, REMOVED, UPLOADED;
 	}
 
 	public static enum Severity {
@@ -59,10 +138,13 @@ public class WorkspaceHelper {
 		@Override
 		public void handle(Message<FileInfo> msg, IWorkspaceListener listener) throws Exception {
 			final FileInfo fi = getContent(msg, FileInfo.class);
-			final File localFile = new File(root, fi.getRecord().getRelPath());
+			final FileRecord record = fi.getRecord();
+			final String relPath = record.getRelPath();
+			final File localFile = new File(root, relPath);
 			if (localFile.exists()) {
-				if (localFile.lastModified() > fi.getRecord().getLastModified()) {
-					listener.doLog(Severity.WARNING, "A file that existed locally is newer than a remotely deleted file:" + fi.getRecord().getRelPath());
+				record.setFile(localFile);
+				if (localFile.lastModified() > getModification(record)) {
+					listener.doLog(Severity.WARNING, "A file that existed locally is newer than a remotely deleted file:" + relPath);
 				} else {
 					localFile.delete();
 					listener.fileOperation(FileOp.REMOVED, localFile);
@@ -72,7 +154,7 @@ public class WorkspaceHelper {
 					deleteCompileInfoFiles(info);
 				}
 			} else {
-				listener.doLog(Severity.WARNING, "A file that existed remotely but not locally has been deleted:" + fi.getRecord().getRelPath());
+				listener.doLog(Severity.WARNING, "A file that existed remotely but not locally has been deleted:" + relPath);
 			}
 
 		}
@@ -102,6 +184,8 @@ public class WorkspaceHelper {
 	private final Multimap<String, MessageHandler<?>> handlerMap = LinkedListMultimap.create();
 
 	private static final ObjectMapper mapper = JSONHelper.getMapper();
+	private FileMonitor fileMonitor;
+	protected Map<String, FileInfo> knownFiles = Maps.newHashMap();
 
 	public WorkspaceHelper(IWorkspaceListener listener) {
 		this.prefs = Preferences.userNodeForPackage(this.getClass());
@@ -137,9 +221,14 @@ public class WorkspaceHelper {
 		this.root = new File(folder);
 		prefs.put(PREF_LAST_WD, folder);
 		readWorkspaceID();
-		if (root.exists()) {
+	}
 
+	public void startFileMonitor() {
+		if (fileMonitor != null) {
+			fileMonitor.stop = true;
 		}
+		fileMonitor = new FileMonitor(root);
+		new Thread(fileMonitor, "FileMonitor").start();
 	}
 
 	public String validateWorkspaceID(String wid) {
@@ -202,6 +291,7 @@ public class WorkspaceHelper {
 
 	public void handleFileInfo(final FileInfo fi) {
 		handleFileUpdate(fi.getRecord());
+		knownFiles.put(fi.getRecord().getRelPath(), fi);
 		final CompileInfo compileInfo = fi.getInfo();
 		if (compileInfo != null) {
 			handleCompileInfo(compileInfo);
@@ -217,9 +307,10 @@ public class WorkspaceHelper {
 
 	public void handleFileUpdate(FileRecord fr) {
 		final File localFile = new File(root, fr.getRelPath());
-		final long lastModified = fr.getLastModified() + ch.serverDiff;
+		final long lastModified = getModification(fr);
 		final String uri = fr.getFileURI();
 		if (localFile.exists()) {
+			fr.setFile(localFile);
 			final long localLastModified = localFile.lastModified();
 			if ((localLastModified < lastModified) || (lastModified == 0)) {
 				ch.downloadFile(localFile, FileOp.UPDATED, lastModified, uri);
@@ -254,11 +345,19 @@ public class WorkspaceHelper {
 	}
 
 	public void closeConnection() {
+		if (fileMonitor != null) {
+			fileMonitor.stop = true;
+			fileMonitor = null;
+		}
 		ch.closeConnection();
 	}
 
 	public void connectTo(String wid) throws IOException {
 		ch.connectTo(wid);
+	}
+
+	private long getModification(FileRecord record) {
+		return record.getLastModified() + ch.serverDiff;
 	}
 
 }

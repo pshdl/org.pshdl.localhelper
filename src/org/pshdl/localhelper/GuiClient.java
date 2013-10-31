@@ -8,10 +8,10 @@ import org.eclipse.swt.events.*;
 import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.layout.*;
 import org.eclipse.swt.widgets.*;
+import org.pshdl.localhelper.ConnectionHelper.Status;
 import org.pshdl.localhelper.WorkspaceHelper.FileOp;
 import org.pshdl.localhelper.WorkspaceHelper.IWorkspaceListener;
 import org.pshdl.localhelper.WorkspaceHelper.Severity;
-import org.pshdl.localhelper.WorkspaceHelper.Status;
 import org.pshdl.rest.models.*;
 
 public class GuiClient implements IWorkspaceListener {

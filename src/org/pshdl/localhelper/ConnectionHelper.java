@@ -9,15 +9,16 @@ import javax.ws.rs.core.*;
 
 import org.glassfish.jersey.apache.connector.*;
 import org.glassfish.jersey.client.*;
+import org.glassfish.jersey.media.multipart.*;
 import org.glassfish.jersey.media.sse.*;
 import org.pshdl.localhelper.WorkspaceHelper.FileOp;
 import org.pshdl.localhelper.WorkspaceHelper.IWorkspaceListener;
 import org.pshdl.localhelper.WorkspaceHelper.Severity;
-import org.pshdl.localhelper.WorkspaceHelper.Status;
 import org.pshdl.rest.models.*;
 
 import com.fasterxml.jackson.core.*;
 import com.fasterxml.jackson.databind.*;
+import com.google.common.base.*;
 import com.google.common.collect.*;
 import com.google.common.io.*;
 
@@ -28,6 +29,10 @@ public class ConnectionHelper {
 	protected Client client;
 	private static final ObjectReader repoReader = JSONHelper.getReader(RepoInfo.class);
 	private static final ObjectReader messageReader = JSONHelper.getReader(Message.class);
+
+	public static enum Status {
+		CONNECTING, CONNECTED, CLOSED, RECONNECT, ERROR
+	}
 
 	public ConnectionHelper(IWorkspaceListener listener, WorkspaceHelper wh) {
 		super();
@@ -92,7 +97,7 @@ public class ConnectionHelper {
 			public void run() {
 				try {
 					listener.connectionStatus(Status.CONNECTING);
-					client = createClient();
+					client = createClient(true);
 					final String clientID = getClientID(wid, client);
 					estimateServerDelta();
 					final RepoInfo repo = getRepoInfo(wid, client);
@@ -113,7 +118,7 @@ public class ConnectionHelper {
 	private static final String SERVER = getServer();
 
 	public void estimateServerDelta() {
-		final Client timeClient = createClient();
+		final Client timeClient = createClient(true);
 		final WebTarget target = timeClient.target("http://" + SERVER + "/serverTime");
 		final SortedSet<CData> cdata = Sets.newTreeSet();
 		for (int i = 0; i < 5; i++) {
@@ -219,7 +224,7 @@ public class ConnectionHelper {
 
 	public void connectToStream(final String wid, final String clientID) {
 		if (client == null) {
-			client = createClient();
+			client = createClient(true);
 		}
 		final WebTarget path = client.target(getURL(wid, true)).path(clientID).path("sse");
 		System.out.println("WorkspaceHelper.connectToStream()" + path.getUri());
@@ -231,6 +236,7 @@ public class ConnectionHelper {
 					try {
 						final Message<?> readValue = messageReader.readValue(message);
 						listener.incomingMessage(readValue);
+						wh.handleMessage(readValue);
 					} catch (final Exception e) {
 						listener.doLog(e);
 						listener.connectionStatus(Status.ERROR);
@@ -238,16 +244,20 @@ public class ConnectionHelper {
 				}
 			};
 			listener.connectionStatus(Status.CONNECTED);
+			wh.startFileMonitor();
 		} catch (final Exception e) {
 			listener.doLog(e);
 			listener.connectionStatus(Status.ERROR);
 		}
 	}
 
-	public Client createClient() {
+	public Client createClient(boolean apache) {
 		final ClientConfig clientConfig = new ClientConfig();
 		clientConfig.register(SseFeature.class);
-		clientConfig.connector(new ApacheConnector(clientConfig));
+		clientConfig.register(MultiPartFeature.class);
+		if (apache) {
+			clientConfig.connector(new ApacheConnector(clientConfig));
+		}
 		return ClientBuilder.newClient(clientConfig);
 	}
 
@@ -259,5 +269,32 @@ public class ConnectionHelper {
 	public String getClientID(final String wid, Client client) {
 		final WebTarget resource = client.target(getURL(wid, true));
 		return resource.path("clientID").request().get(String.class);
+	}
+
+	public void uploadFile(File file, String workspaceID, String name) throws IOException {
+		final FormDataMultiPart formDataMultiPart = new FormDataMultiPart();
+		final FormDataContentDisposition dispo = FormDataContentDisposition//
+				.name("file")//
+				.fileName(name)//
+				.size(file.length())//
+				.modificationDate(new Date(file.lastModified())).build();
+		formDataMultiPart.bodyPart(new FormDataBodyPart(dispo, Files.toString(file, Charsets.UTF_8)));
+		final Client client = createClient(false);
+		final Response response = client.target(getURL(workspaceID, false)).request(MediaType.TEXT_PLAIN_TYPE)
+				.post(Entity.entity(formDataMultiPart, formDataMultiPart.getMediaType()));
+		final int status = response.getStatus();
+		if (status != 201) {
+			listener.doLog(Severity.ERROR, "Failed to upload file:" + file + " status was:" + status);
+		}
+
+	}
+
+	public void deleteFile(String workspaceID, String relPath) {
+		final Client client = createClient(false);
+		final Response response = client.target(getURL(workspaceID, false)).path("delete").path(relPath).request(MediaType.TEXT_PLAIN_TYPE).delete();
+		final int status = response.getStatus();
+		if (status != 200) {
+			listener.doLog(Severity.ERROR, "Failed to delete file:" + relPath + " status was:" + status);
+		}
 	}
 }
