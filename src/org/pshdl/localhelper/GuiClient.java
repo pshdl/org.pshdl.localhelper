@@ -26,10 +26,14 @@ public class GuiClient implements IWorkspaceListener {
 	private Shell shell;
 
 	public static void main(String[] args) {
-		final GuiClient client = new GuiClient();
-		client.createUI();
-		client.runUI();
-		client.close();
+		try {
+			final GuiClient client = new GuiClient();
+			client.createUI();
+			client.runUI();
+			client.close();
+		} catch (final Exception e) {
+			e.printStackTrace();
+		}
 		System.exit(0);
 	}
 
