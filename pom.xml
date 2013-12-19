@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.pshdl</groupId>
 	<artifactId>localhelper</artifactId>
-	<version>0.1.45</version>
+	<version>0.1.47</version>
 	<build>
 		<sourceDirectory>src</sourceDirectory>
 		<plugins>
@@ -40,7 +40,7 @@
 		<dependency>
 			<groupId>org.pshdl</groupId>
 			<artifactId>localhelper.core</artifactId>
-			<version>0.1.45</version>
+			<version>0.1.47</version>
 		</dependency>
 	</dependencies>
 </project>
