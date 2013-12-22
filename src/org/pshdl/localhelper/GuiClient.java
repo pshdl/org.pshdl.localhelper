@@ -1,6 +1,7 @@
 package org.pshdl.localhelper;
 
 import java.io.*;
+import java.util.prefs.*;
 
 import org.eclipse.swt.*;
 import org.eclipse.swt.custom.*;
@@ -15,6 +16,7 @@ import org.pshdl.localhelper.WorkspaceHelper.Severity;
 import org.pshdl.rest.models.*;
 
 public class GuiClient implements IWorkspaceListener {
+	private static final String LAST_WD = "LAST_WD";
 	private static final String CONNECTING_STR = "Connecting";
 	private static final String CONNECT_STR = "Connect";
 	private static final String DISCONNECT_STR = "Disconnect";
@@ -24,6 +26,7 @@ public class GuiClient implements IWorkspaceListener {
 	private StyledText log;
 	final Display display = new Display();
 	private Shell shell;
+	private final Preferences pref;
 
 	public static void main(String[] args) {
 		try {
@@ -47,7 +50,9 @@ public class GuiClient implements IWorkspaceListener {
 	}
 
 	public GuiClient() {
-		this.helper = new WorkspaceHelper(this);
+		this.pref = Preferences.userNodeForPackage(GuiClient.class);
+		final String lastWD = pref.get(LAST_WD, null);
+		this.helper = new WorkspaceHelper(this, null, lastWD);
 	}
 
 	private void close() {
@@ -83,6 +88,7 @@ public class GuiClient implements IWorkspaceListener {
 					label.setText(folder);
 					widText.setEnabled(true);
 					btnConnect.setEnabled(true);
+					pref.put(LAST_WD, folder);
 				}
 
 			}
