@@ -10,6 +10,7 @@ import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.layout.*;
 import org.eclipse.swt.widgets.*;
 import org.pshdl.localhelper.ConnectionHelper.Status;
+import org.pshdl.localhelper.PSSyncCommandLine.Configuration;
 import org.pshdl.localhelper.WorkspaceHelper.FileOp;
 import org.pshdl.localhelper.WorkspaceHelper.IWorkspaceListener;
 import org.pshdl.localhelper.WorkspaceHelper.Severity;
@@ -30,7 +31,8 @@ public class GuiClient implements IWorkspaceListener {
 
 	public static void main(String[] args) {
 		try {
-			final GuiClient client = new GuiClient();
+			final Configuration config = PSSyncCommandLine.configure(args);
+			final GuiClient client = new GuiClient(config);
 			client.createUI();
 			client.runUI();
 			client.close();
@@ -49,10 +51,10 @@ public class GuiClient implements IWorkspaceListener {
 		display.dispose();
 	}
 
-	public GuiClient() {
+	public GuiClient(Configuration config) throws IOException {
 		this.pref = Preferences.userNodeForPackage(GuiClient.class);
 		final String lastWD = pref.get(LAST_WD, null);
-		this.helper = new WorkspaceHelper(this, null, lastWD);
+		this.helper = new WorkspaceHelper(this, null, lastWD, config);
 	}
 
 	private void close() {
@@ -255,6 +257,13 @@ public class GuiClient implements IWorkspaceListener {
 	@Override
 	public void connectionStatus(final Status status) {
 		if ((display != null) && !display.isDisposed()) {
+			if (status == Status.CONNECTED) {
+				try {
+					helper.announceServices();
+				} catch (final IOException e) {
+					e.printStackTrace();
+				}
+			}
 			display.asyncExec(new Runnable() {
 
 				@Override
