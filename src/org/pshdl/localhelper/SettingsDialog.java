@@ -78,10 +78,11 @@ public class SettingsDialog {
 		final Button btnSaveSettings = new Button(shell, SWT.NONE);
 		btnSaveSettings.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
 		btnSaveSettings.setText("Save settings");
+		loadFromSettings();
 		return shell;
 	}
 
-	void validateSettings() {
+	public void validateSettings() {
 		updateLabel(new File(synplifyLocation.getText()), lblSynplify);
 		updateLabel(new File(actTCLShellLocation.getText()), lblActelTclShell);
 		updateLabel(new File(fpgaProgrammerLocation.getText()), lblFpgaprogrammerExecutable);
@@ -99,7 +100,7 @@ public class SettingsDialog {
 		actTCLShellLocation.setText(config.acttclsh.getAbsolutePath());
 		synplifyLocation.setText(config.synplify.getAbsolutePath());
 		fpgaProgrammerLocation.setText(config.progammer.getAbsolutePath());
-
+		validateSettings();
 	}
 
 }

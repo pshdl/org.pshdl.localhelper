@@ -28,6 +28,7 @@ public class GuiClient implements IWorkspaceListener {
 	final Display display = new Display();
 	private Shell shell;
 	private final Preferences pref;
+	private final Configuration config;
 
 	public static void main(String[] args) {
 		try {
@@ -52,6 +53,7 @@ public class GuiClient implements IWorkspaceListener {
 	}
 
 	public GuiClient(Configuration config) throws IOException {
+		this.config = config;
 		this.pref = Preferences.userNodeForPackage(GuiClient.class);
 		final String lastWD = pref.get(LAST_WD, null);
 		this.helper = new WorkspaceHelper(this, null, lastWD, config);
@@ -148,7 +150,18 @@ public class GuiClient implements IWorkspaceListener {
 
 		final ProgressBar progressBar = new ProgressBar(shell, SWT.NONE);
 		progressBar.setLayoutData(new GridData(SWT.FILL, SWT.FILL, false, false, 1, 1));
-		new Label(shell, SWT.NONE);
+		// new Label(shell, SWT.NONE);
+
+		final Button settings = new Button(shell, SWT.NONE);
+		settings.setText("Settings");
+		settings.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
+		settings.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				final SettingsDialog dialog = new SettingsDialog(config);
+				dialog.createShell().open();
+			}
+		});
 
 		final ScrolledComposite scrolledComposite = new ScrolledComposite(shell, SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
 		scrolledComposite.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true, 3, 1));
