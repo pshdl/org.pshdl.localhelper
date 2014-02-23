@@ -5,6 +5,7 @@
 	<artifactId>localhelper</artifactId>
 	<version>0.1.59</version>
 	<properties>
+		<property environment="env" />
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<swt.version>4.3</swt.version>
@@ -21,18 +22,51 @@
 				</configuration>
 			</plugin>
 			<plugin>
-				<groupId>org.codehaus.mojo</groupId>
-				<artifactId>osxappbundle-maven-plugin</artifactId>
-				<version>1.0-alpha-1</version>
-				<configuration>
-					<mainClass>org.pshdl.localhelper.GuiClient</mainClass>
-					<iconFile>${basedir}/src/PSHDLIcon512.icns</iconFile>
-				</configuration>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>copy-application</id>
+						<phase>generate-resources</phase>
+						<goals>
+							<goal>copy-dependencies</goal>
+						</goals>
+						<configuration>
+							<outputDirectory>${project.build.directory}/application</outputDirectory>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>1.7</version>
 				<executions>
 					<execution>
 						<phase>package</phase>
+						<configuration>
+							<target>
+								<taskdef name="bundleapp" classname="com.oracle.appbundler.AppBundlerTask"
+									classpath="appbundler-1.0ea.jar" />
+								<bundleapp outputdirectory="${project.build.directory}"
+									name="PSHDLLocalHelper" displayname="PSHDL Localhelper"
+									identifier="org.pshdl.localhelper" shortversion="1.0"
+									mainclassname="org/pshdl/localhelper/GuiClient"
+									applicationCategory="public.app-category.developer-tools"
+									icon="/Users/karstenbecker/Dropbox/PSHDL/icons/PSHDL.icns"
+									highResolutionCapable="true">
+									<!-- <runtime dir="${env.JAVA_HOME}" /> -->
+									<classpath dir="${project.basedir}" casesensitive="yes">
+										<include name="target/${project.artifactId}-${project.version}.jar" />
+										<include name="target/application/*.jar" />
+									</classpath>
+									<librarypath file="/Users/karstenbecker/Dropbox/PSHDL/fpga_programmer_interface/fpga_programmer">
+									</librarypath>
+									<option value="-XstartOnFirstThread" />
+								</bundleapp>
+							</target>
+						</configuration>
 						<goals>
-							<goal>bundle</goal>
+							<goal>run</goal>
 						</goals>
 					</execution>
 				</executions>
@@ -140,7 +174,7 @@
 		<dependency>
 			<groupId>org.pshdl</groupId>
 			<artifactId>localhelper.core</artifactId>
-			<version>0.1.58</version>
+			<version>0.1.60</version>
 		</dependency>
 	</dependencies>
 </project>
