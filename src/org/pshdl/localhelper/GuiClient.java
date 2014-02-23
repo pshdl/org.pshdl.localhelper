@@ -59,6 +59,11 @@ public class GuiClient implements IWorkspaceListener {
 	public static void main(String[] args) {
 		try {
 			final Configuration config = PSSyncCommandLine.configure(args);
+			if (config.progammer.exists()) {
+				System.out.println("Found executable(" + config.progammer.canExecute() + ") programmer at:" + config.progammer);
+			} else {
+				System.out.println("Did not find a programmer");
+			}
 			final GuiClient client = new GuiClient(config);
 			client.createUI();
 			client.runUI();
