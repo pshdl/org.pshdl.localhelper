@@ -1,3 +1,4 @@
 target
 *.versionsBackup
 MacOSX
+dependency-reduced-pom.xml
