@@ -27,8 +27,14 @@
 package org.pshdl.localhelper;
 
 import java.io.*;
+import java.util.*;
+import java.util.prefs.*;
+
+import jssc.*;
 
 import org.eclipse.swt.*;
+import org.eclipse.swt.events.*;
+import org.eclipse.swt.graphics.*;
 import org.eclipse.swt.layout.*;
 import org.eclipse.swt.widgets.*;
 import org.pshdl.localhelper.PSSyncCommandLine.Configuration;
@@ -43,9 +49,11 @@ public class SettingsDialog {
 	private Label lblSynplify;
 	private Label lblActelTclShell;
 	private Combo comPortBox;
+	private final WorkspaceHelper helper;
 
-	public SettingsDialog(Configuration config) {
+	public SettingsDialog(Configuration config, WorkspaceHelper helper) {
 		this.config = config;
+		this.helper = helper;
 	}
 
 	/**
@@ -62,9 +70,7 @@ public class SettingsDialog {
 		fpgaProgrammerLocation = new Text(shell, SWT.BORDER);
 		fpgaProgrammerLocation.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 1, 1));
 
-		final Button btnLocate = new Button(shell, SWT.NONE);
-		btnLocate.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
-		btnLocate.setText("locate");
+		locateButton(shell, fpgaProgrammerLocation);
 
 		lblSerialPort = new Label(shell, SWT.NONE);
 		lblSerialPort.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
@@ -72,10 +78,24 @@ public class SettingsDialog {
 
 		comPortBox = new Combo(shell, SWT.NONE);
 		comPortBox.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 1, 1));
+		comPortBox.setItems(SerialPortList.getPortNames());
+		if (comPortBox.getItemCount() > 0) {
+			comPortBox.select(0);
+		}
 
 		final Button btnUpdateList = new Button(shell, SWT.NONE);
 		btnUpdateList.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
 		btnUpdateList.setText("update list");
+		btnUpdateList.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				final String[] portNames = SerialPortList.getPortNames();
+				comPortBox.setItems(portNames);
+				if (portNames.length > 0) {
+					comPortBox.select(0);
+				}
+			}
+		});
 
 		lblSynplify = new Label(shell, SWT.NONE);
 		lblSynplify.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
@@ -84,9 +104,7 @@ public class SettingsDialog {
 		synplifyLocation = new Text(shell, SWT.BORDER);
 		synplifyLocation.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 1, 1));
 
-		final Button btnLocate_1 = new Button(shell, SWT.NONE);
-		btnLocate_1.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
-		btnLocate_1.setText("locate");
+		locateButton(shell, synplifyLocation);
 
 		lblActelTclShell = new Label(shell, SWT.NONE);
 		lblActelTclShell.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
@@ -95,34 +113,85 @@ public class SettingsDialog {
 		actTCLShellLocation = new Text(shell, SWT.BORDER);
 		actTCLShellLocation.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false, 1, 1));
 
-		final Button btnLocate_2 = new Button(shell, SWT.NONE);
-		btnLocate_2.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
-		btnLocate_2.setText("locate");
+		locateButton(shell, actTCLShellLocation);
+
 		new Label(shell, SWT.NONE);
 		new Label(shell, SWT.NONE);
 
 		final Button btnSaveSettings = new Button(shell, SWT.NONE);
 		btnSaveSettings.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
 		btnSaveSettings.setText("Save settings");
+		btnSaveSettings.addSelectionListener(new SelectionAdapter() {
+
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				saveToSettings();
+				shell.close();
+				helper.updateServices();
+			}
+
+		});
 		loadFromSettings();
+		shell.pack();
+		final Point size = shell.getSize();
+		if (size.x > 700) {
+			shell.setSize(700, size.y);
+		}
 		return shell;
+	}
+
+	public void locateButton(final Shell shell, final Text label) {
+		final Button btnLocate = new Button(shell, SWT.NONE);
+		btnLocate.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 1, 1));
+		btnLocate.setText("locate");
+		btnLocate.addSelectionListener(new SelectionAdapter() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				final FileDialog fd = new FileDialog(shell, SWT.OPEN);
+				fd.setFilterPath(label.getText());
+				final String open = fd.open();
+				if (open != null) {
+					label.setText(open);
+				}
+			}
+		});
+	}
+
+	protected void saveToSettings() {
+		config.acttclsh = new File(actTCLShellLocation.getText());
+		config.synplify = new File(synplifyLocation.getText());
+		config.progammer = new File(fpgaProgrammerLocation.getText());
+		config.comPort = comPortBox.getText();
+		config.saveToPreferences(Preferences.userNodeForPackage(GuiClient.class));
 	}
 
 	public void validateSettings() {
 		updateLabel(new File(synplifyLocation.getText()), lblSynplify);
 		updateLabel(new File(actTCLShellLocation.getText()), lblActelTclShell);
 		updateLabel(new File(fpgaProgrammerLocation.getText()), lblFpgaprogrammerExecutable);
+		if (!Arrays.asList(SerialPortList.getPortNames()).contains(comPortBox.getText())) {
+			lblSerialPort.setForeground(Display.getCurrent().getSystemColor(SWT.COLOR_RED));
+		} else {
+			lblSerialPort.setForeground(null);
+		}
 	}
 
 	private void updateLabel(File file, Label label) {
-		if (file.exists()) {
+		if (!file.exists() || !file.canExecute()) {
+			if (!file.exists()) {
+				label.setToolTipText("The file " + file.getAbsolutePath() + " can not be found");
+			} else {
+				label.setToolTipText("The file " + file.getAbsolutePath() + " is not executable");
+			}
 			label.setForeground(Display.getCurrent().getSystemColor(SWT.COLOR_RED));
 		} else {
+			label.setToolTipText(null);
 			label.setForeground(null);
 		}
 	}
 
 	private void loadFromSettings() {
+		config.loadFromPref(Preferences.userNodeForPackage(GuiClient.class));
 		actTCLShellLocation.setText(config.acttclsh.getAbsolutePath());
 		synplifyLocation.setText(config.synplify.getAbsolutePath());
 		fpgaProgrammerLocation.setText(config.progammer.getAbsolutePath());

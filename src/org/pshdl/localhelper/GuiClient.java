@@ -64,6 +64,7 @@ public class GuiClient implements IWorkspaceListener {
 			} else {
 				System.out.println("Did not find a programmer");
 			}
+
 			final GuiClient client = new GuiClient(config);
 			client.createUI();
 			client.runUI();
@@ -87,6 +88,7 @@ public class GuiClient implements IWorkspaceListener {
 		this.config = config;
 		this.pref = Preferences.userNodeForPackage(GuiClient.class);
 		final String lastWD = pref.get(LAST_WD, null);
+		config.loadFromPref(pref);
 		this.helper = new WorkspaceHelper(this, null, lastWD, config);
 	}
 
@@ -189,7 +191,7 @@ public class GuiClient implements IWorkspaceListener {
 		settings.addSelectionListener(new SelectionAdapter() {
 			@Override
 			public void widgetSelected(SelectionEvent e) {
-				final SettingsDialog dialog = new SettingsDialog(config);
+				final SettingsDialog dialog = new SettingsDialog(config, helper);
 				dialog.createShell().open();
 			}
 		});
@@ -350,12 +352,28 @@ public class GuiClient implements IWorkspaceListener {
 
 	@Override
 	public void incomingMessage(Message<?> message) {
-		doLog(Severity.INFO, "Received " + message);
+		doLog(Severity.INFO, "Received message type:" + message.subject);
 	}
 
 	@Override
 	public void fileOperation(FileOp op, File localFile) {
-		doLog(Severity.INFO, "Performed the file operation:" + op + " on file:" + localFile);
+		final String relPath = helper.makeRelative(localFile);
+		String msg = "Performed the file operation:" + op + " on file:" + localFile;
+		switch (op) {
+		case ADDED:
+			msg = "Added the file " + relPath + " to the workspace";
+			break;
+		case REMOVED:
+			msg = "Removed the file " + relPath + " from the workspace";
+			break;
+		case UPDATED:
+			msg = "Updated the file " + relPath + " to the latest version";
+			break;
+		case UPLOADED:
+			msg = "Uploaded the file " + relPath + " to the remote workspace";
+			break;
+		}
+		doLog(Severity.INFO, msg);
 	}
 
 	@Override
