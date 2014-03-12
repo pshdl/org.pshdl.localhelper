@@ -9,11 +9,12 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<swt.version>4.3</swt.version>
+		<pshdl.root>/Users/karstenbecker/Dropbox/PSHDL/</pshdl.root>
 	</properties>
 	<distributionManagement>
 		<repository>
 			<id>repo</id>
-			<url>file:///Users/karstenbecker/Dropbox/PSHDL/MavenRepo/</url>
+			<url>file://${pshdl.root}/MavenRepo/</url>
 		</repository>
 	</distributionManagement>
 	<build>
@@ -29,52 +30,24 @@
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-dependency-plugin</artifactId>
-				<executions>
-					<execution>
-						<id>copy-application</id>
-						<phase>generate-resources</phase>
-						<goals>
-							<goal>copy-dependencies</goal>
-						</goals>
-						<configuration>
-							<outputDirectory>${project.build.directory}/application</outputDirectory>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
-			<plugin>
-				<artifactId>maven-antrun-plugin</artifactId>
-				<version>1.7</version>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>2.1</version>
 				<executions>
 					<execution>
 						<phase>package</phase>
-						<configuration>
-							<target>
-								<taskdef name="bundleapp" classname="com.oracle.appbundler.AppBundlerTask"
-									classpath="appbundler-1.0ea.jar" />
-								<bundleapp outputdirectory="${project.build.directory}"
-									name="PSHDLLocalHelper" displayname="PSHDL Localhelper"
-									identifier="org.pshdl.localhelper" shortversion="1.0"
-									mainclassname="org/pshdl/localhelper/GuiClient"
-									applicationCategory="public.app-category.developer-tools"
-									icon="/Users/karstenbecker/Dropbox/PSHDL/icons/PSHDL.icns"
-									highResolutionCapable="true">
-									<!-- <runtime dir="${env.JAVA_HOME}" /> -->
-									<classpath dir="${project.basedir}" casesensitive="yes">
-										<include name="target/${project.artifactId}-${project.version}.jar" />
-										<include name="target/application/*.jar" />
-									</classpath>
-									<librarypath
-										file="/Users/karstenbecker/Dropbox/PSHDL/fpga_programmer_interface/fpga_programmer">
-									</librarypath>
-									<option value="-XstartOnFirstThread" />
-								</bundleapp>
-							</target>
-						</configuration>
 						<goals>
-							<goal>run</goal>
+							<goal>shade</goal>
 						</goals>
+						<configuration>
+							<transformers>
+								<transformer
+									implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+								<transformer
+									implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+									<mainClass>org.pshdl.localhelper.GuiClient</mainClass>
+								</transformer>
+							</transformers>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>
@@ -100,6 +73,7 @@
 			<properties>
 				<swt.artifactId>org.eclipse.swt.gtk.linux.x86</swt.artifactId>
 			</properties>
+			<build><directory>target\linux32</directory></build>
 		</profile>
 		<profile>
 			<id>linux64</id>
@@ -112,18 +86,7 @@
 			<properties>
 				<swt.artifactId>org.eclipse.swt.gtk.linux.x86_64</swt.artifactId>
 			</properties>
-		</profile>
-		<profile>
-			<id>macosx32</id>
-			<activation>
-				<os>
-					<family>macosx</family>
-					<arch>i386</arch>
-				</os>
-			</activation>
-			<properties>
-				<swt.artifactId>org.eclipse.swt.cocoa.macosx</swt.artifactId>
-			</properties>
+			<build><directory>target\linux64</directory></build>
 		</profile>
 		<profile>
 			<id>macosx64</id>
@@ -137,6 +100,78 @@
 			<properties>
 				<swt.artifactId>org.eclipse.swt.cocoa.macosx.x86_64</swt.artifactId>
 			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-dependency-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>copy-application</id>
+								<phase>generate-resources</phase>
+								<goals>
+									<goal>copy-dependencies</goal>
+								</goals>
+								<configuration>
+									<outputDirectory>${project.build.directory}/application</outputDirectory>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+					<plugin>
+						<artifactId>maven-antrun-plugin</artifactId>
+						<version>1.7</version>
+						<executions>
+							<execution>
+								<phase>package</phase>
+								<configuration>
+									<target>
+										<taskdef name="bundleapp" classname="com.oracle.appbundler.AppBundlerTask"
+											classpath="appbundler-1.0ea.jar" />
+										<bundleapp outputdirectory="${project.build.directory}"
+											name="PSHDLLocalHelper" displayname="PSHDL Localhelper"
+											identifier="org.pshdl.localhelper" shortversion="1.0"
+											mainclassname="org/pshdl/localhelper/GuiClient"
+											applicationCategory="public.app-category.developer-tools"
+											icon="${pshdl.root}/icons/PSHDL.icns"
+											highResolutionCapable="true">
+											<classpath dir="${project.basedir}" casesensitive="yes">
+												<include
+													name="target/macosx64/${project.artifactId}-${project.version}.jar" />
+											</classpath>
+											<librarypath
+												file="${pshdl.root}/fpga_programmer_interface/fpga_programmer">
+											</librarypath>
+											<option value="-XstartOnFirstThread" />
+										</bundleapp>
+										<bundleapp outputdirectory="${project.build.directory}"
+											name="PSHDLLocalHelperJRE" displayname="PSHDL Localhelper"
+											identifier="org.pshdl.localhelper" shortversion="1.0"
+											mainclassname="org/pshdl/localhelper/GuiClient"
+											applicationCategory="public.app-category.developer-tools"
+											icon="${pshdl.root}/icons/PSHDL.icns"
+											highResolutionCapable="true">
+											<runtime dir="${env.JAVA_HOME}" />
+											<classpath dir="${project.basedir}" casesensitive="yes">
+												<include
+													name="target/macosx64/${project.artifactId}-${project.version}.jar" />
+											</classpath>
+											<librarypath
+												file="${pshdl.root}/fpga_programmer_interface/fpga_programmer">
+											</librarypath>
+											<option value="-XstartOnFirstThread" />
+										</bundleapp>
+									</target>
+								</configuration>
+								<goals>
+									<goal>run</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+				<directory>target\macosx64</directory>
+			</build>
 		</profile>
 		<profile>
 			<id>win32</id>
@@ -149,6 +184,7 @@
 			<properties>
 				<swt.artifactId>org.eclipse.swt.win32.win32.x86</swt.artifactId>
 			</properties>
+			<build><directory>target\win32</directory></build>
 		</profile>
 		<profile>
 			<id>win64</id>
@@ -161,6 +197,7 @@
 			<properties>
 				<swt.artifactId>org.eclipse.swt.win32.win32.x86_64</swt.artifactId>
 			</properties>
+			<build><directory>target\win64</directory></build>
 		</profile>
 	</profiles>
 
@@ -169,13 +206,16 @@
 			<id>swt-repo</id>
 			<url>https://swt-repo.googlecode.com/svn/repo/</url>
 		</repository>
+		<repository>
+			<id>PSHDL-Repo</id>
+			<url>file://${pshdl.root}/MavenRepo/</url>
+		</repository>
 	</repositories>
 	<dependencies>
 		<dependency>
 			<groupId>org.eclipse.swt</groupId>
 			<artifactId>${swt.artifactId}</artifactId>
 			<version>${swt.version}</version>
-			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.pshdl</groupId>
@@ -183,9 +223,9 @@
 			<version>0.1.63</version>
 		</dependency>
 		<dependency>
-			<groupId>jssc</groupId>
+			<groupId>org.scream3r</groupId>
 			<artifactId>jssc</artifactId>
-			<version>2.6.0</version>
+			<version>2.8.0</version>
 		</dependency>
 	</dependencies>
 </project>
