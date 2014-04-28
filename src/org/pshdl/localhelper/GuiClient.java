@@ -26,21 +26,42 @@
  ******************************************************************************/
 package org.pshdl.localhelper;
 
-import java.io.*;
-import java.util.prefs.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.prefs.Preferences;
 
-import org.eclipse.swt.*;
-import org.eclipse.swt.custom.*;
-import org.eclipse.swt.events.*;
-import org.eclipse.swt.graphics.*;
-import org.eclipse.swt.layout.*;
-import org.eclipse.swt.widgets.*;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.ScrolledComposite;
+import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.events.DisposeEvent;
+import org.eclipse.swt.events.DisposeListener;
+import org.eclipse.swt.events.SelectionAdapter;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.ImageLoader;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.DirectoryDialog;
+import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Listener;
+import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.MenuItem;
+import org.eclipse.swt.widgets.MessageBox;
+import org.eclipse.swt.widgets.ProgressBar;
+import org.eclipse.swt.widgets.Shell;
+import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.widgets.Tray;
+import org.eclipse.swt.widgets.TrayItem;
 import org.pshdl.localhelper.ConnectionHelper.Status;
 import org.pshdl.localhelper.PSSyncCommandLine.Configuration;
 import org.pshdl.localhelper.WorkspaceHelper.FileOp;
 import org.pshdl.localhelper.WorkspaceHelper.IWorkspaceListener;
 import org.pshdl.localhelper.WorkspaceHelper.Severity;
-import org.pshdl.rest.models.*;
+import org.pshdl.rest.models.Message;
 
 public class GuiClient implements IWorkspaceListener {
 	private static final String LAST_WD = "LAST_WD";

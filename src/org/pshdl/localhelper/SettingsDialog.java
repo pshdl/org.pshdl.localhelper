@@ -26,17 +26,25 @@
  ******************************************************************************/
 package org.pshdl.localhelper;
 
-import java.io.*;
-import java.util.*;
-import java.util.prefs.*;
+import java.io.File;
+import java.util.Arrays;
+import java.util.prefs.Preferences;
 
-import jssc.*;
+import jssc.SerialPortList;
 
-import org.eclipse.swt.*;
-import org.eclipse.swt.events.*;
-import org.eclipse.swt.graphics.*;
-import org.eclipse.swt.layout.*;
-import org.eclipse.swt.widgets.*;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.SelectionAdapter;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
+import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.FileDialog;
+import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Shell;
+import org.eclipse.swt.widgets.Text;
 import org.pshdl.localhelper.PSSyncCommandLine.Configuration;
 
 public class SettingsDialog {
