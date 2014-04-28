@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.pshdl</groupId>
 	<artifactId>localhelper</artifactId>
-	<version>0.1.76</version>
+	<version>0.1.77</version>
 	<properties>
 		<property environment="env" />
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -257,7 +257,7 @@
 		<dependency>
 			<groupId>org.pshdl</groupId>
 			<artifactId>localhelper.core</artifactId>
-			<version>0.1.76</version>
+			<version>0.1.77</version>
 		</dependency>
 		<dependency>
 			<groupId>org.scream3r</groupId>
