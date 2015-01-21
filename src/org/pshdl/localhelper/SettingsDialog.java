@@ -65,7 +65,7 @@ public class SettingsDialog {
 	}
 
 	/**
-	 * @wbp.parser.entryPoint
+	 * wbp.parser.entryPoint
 	 */
 	public Shell createShell() {
 		final Shell shell = new Shell(Display.getCurrent());
